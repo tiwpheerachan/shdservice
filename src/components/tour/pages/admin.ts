@@ -160,13 +160,6 @@ const MASTERS: Record<string, Tour> = {
       },
     ],
   }),
-  '/admin/product-types': simpleList({
-    title: 'ประเภทเครื่องซ่อม',
-    welcome: 'ประเภทเครื่องเป็นตัวเลือกช่อง ประเภทสินค้า ในข้อมูลสินค้าของงานซ่อม',
-    nameLabel: 'ประเภทเครื่องซ่อม',
-    example: 'โทรศัพท์มือถือ',
-    detailMax: TEXT_MAX,
-  }),
   '/admin/symptoms': simpleList({
     title: 'อาการเสีย มาตรฐาน',
     welcome: 'อาการเสียเป็นตัวเลือกช่อง อาการเสียหลัก (มาตรฐาน) ตอนเปิดงาน และใช้ในรายงานงานซ่อม',

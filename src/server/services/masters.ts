@@ -2,7 +2,7 @@ import 'server-only';
 import { cached, invalidate, TTL_MASTER } from '@/server/cache';
 import { and, asc, count, desc, eq, ilike, ne, or, sql } from 'drizzle-orm';
 import { db, writeTx } from '@/db/client';
-import { brand, category, color, jobType, model, productType, symptom } from '@/db/schema';
+import { brand, category, color, jobType, model, symptom } from '@/db/schema';
 import type { MasterRow, Symptom, Model } from '@/data/types';
 import { HttpError } from '@/server/auth';
 import { fmtDateTime, money, nowThai, num } from '@/server/mappers/format';
@@ -85,7 +85,7 @@ function assertLoaded(now: Partial<Record<Loaded, unknown>>, expect?: MasterExpe
     throw new HttpError(409, 'ผู้ดูแลระบบคนอื่นเพิ่งแก้รายการนี้ — โหลดหน้าใหม่แล้วแก้อีกครั้ง', { stale: true });
 }
 
-type SimpleKind = 'categories' | 'manufacturers' | 'colors' | 'job_types' | 'product_types';
+type SimpleKind = 'categories' | 'manufacturers' | 'colors' | 'job_types';
 
 /** what the audit page calls each master table */
 const KIND_NOUN: Record<SimpleKind, string> = {
@@ -93,7 +93,6 @@ const KIND_NOUN: Record<SimpleKind, string> = {
   manufacturers: 'ยี่ห้อ',
   colors: 'สี',
   job_types: 'ประเภทงาน',
-  product_types: 'ประเภทสินค้า',
 };
 const SIMPLE = {
   categories: {
@@ -148,18 +147,6 @@ const SIMPLE = {
       days: 'defaultDueDays',
     },
     days: jobType.defaultDueDays, // SLA → the real due date of a job nobody picked one for
-    nameLen: 50,
-  },
-  product_types: {
-    table: productType,
-    id: productType.pk,
-    uuid: productType.id,
-    name: productType.productTypeName,
-    detail: productType.productTypeDescription,
-    extra: null,
-    active: productType.recordStatus,
-    days: null,
-    keys: { name: 'productTypeName', detail: 'productTypeDescription', extra: null, days: null },
     nameLen: 50,
   },
 } as const;

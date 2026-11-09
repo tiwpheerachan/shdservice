@@ -1837,7 +1837,6 @@ try {
             channel: 'Offline',
             warrantyMonth: 1225,
             receptionShipper: 'TD ขนส่งไม่มีจริง',
-            productType: 'TD-NOPE-TYPE',
             remark: 'TD junk',
           },
           U.admin.id,
@@ -1856,11 +1855,11 @@ try {
       const m = await fieldsOf(
         updateJob(
           JOB_LEGACY,
-          { ...base, receptionShipper: 'TD ขนส่งไม่มีจริง', productType: 'TD-NOPE-TYPE' },
+          { ...base, receptionShipper: 'TD ขนส่งไม่มีจริง' },
           U.admin.id,
         ),
       );
-      assert.deepEqual(Object.keys(m.fields ?? {}).sort(), ['productType', 'receptionShipper']);
+      assert.deepEqual(Object.keys(m.fields ?? {}).sort(), ['receptionShipper']);
       assert.notEqual((await row(JOB_LEGACY)).remark, 'TD junk');
     });
     await test('J: values are stored cleaned (cleanCode / no "S/N:" / no spaces in parcel no / clean text)', async () => {
@@ -4908,7 +4907,6 @@ try {
         warrantyMonth: j.warrantyMonth,
         expireDate: j.expireDate,
         warranty: j.warranty,
-        productType: j.productType,
         imei: j.imei,
         serial: j.serial,
         brand: j.brand,
@@ -6584,16 +6582,12 @@ try {
       assert.equal((await trail('TDJQ07')).a, before.a + 1);
     });
 
-    await test('QA 5: ประวัติการแก้ไข shows names for the id columns (job type, product type, brand, model, symptoms, shipper, customer); unknown id stays', async () => {
+    await test('QA 5: ประวัติการแก้ไข shows names for the id columns (job type, brand, model, symptoms, shipper, customer); unknown id stays', async () => {
       await pool.query(`
-        INSERT INTO product_type (product_type_name) SELECT 'TD ประเภทสินค้า' WHERE NOT EXISTS (SELECT 1 FROM product_type WHERE product_type_name = 'TD ประเภทสินค้า');
         INSERT INTO shipping_profile (code, name_th) SELECT 'TDQA', 'TD ขนส่ง QA' WHERE NOT EXISTS (SELECT 1 FROM shipping_profile WHERE code = 'TDQA');`);
       invalidate('master:');
       const one = async (q: string) => (await pool.query<{ id: number; n: string }>(q)).rows[0]!;
       const jt = await one(`SELECT pk::int AS id, job_type_name AS n FROM job_type WHERE job_type_name = 'TD งานซ่อม'`);
-      const pt = await one(
-        `SELECT pk::int AS id, product_type_name AS n FROM product_type WHERE product_type_name = 'TD ประเภทสินค้า'`,
-      );
       const br = await one(`SELECT pk::int AS id, brand_name AS n FROM brand ORDER BY pk LIMIT 1`);
       const md = await one(`SELECT pk::int AS id, model_code AS n FROM model ORDER BY pk LIMIT 1`);
       const sy = await one(`SELECT pk::int AS id, symptom_name AS n FROM symptom ORDER BY pk LIMIT 1`);
@@ -6609,7 +6603,6 @@ try {
         summary: 'TD QA ids',
         changes: {
           jobTypeId: [999999, jt.id],
-          productTypeId: [null, pt.id],
           productBrandId: [br.id, null],
           productModelId: [md.id, 999999],
           productSymptomId: [sy.id, sy.id],
@@ -6621,7 +6614,6 @@ try {
       const h = (await getJob('TDJQ08'))!.history.find((x) => x.summary === 'TD QA ids')!;
       assert.deepEqual(h.changes, {
         jobTypeId: [999999, jt.n],
-        productTypeId: [null, pt.n],
         productBrandId: [br.n, null],
         productModelId: [md.n, 999999],
         productSymptomId: [sy.n, sy.n],

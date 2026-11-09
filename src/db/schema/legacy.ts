@@ -361,7 +361,6 @@ export const job = pgTable(
     productImeiNo: varchar('product_imei_no', { length: 50 }),
     productSerial: varchar('product_serial', { length: 50 }),
     newSerialNo: varchar('new_serial_no', { length: 50 }),
-    productTypePk: pkRef('product_type_pk'),
     modelPk: pkRef('model_pk').notNull(),
     productModelName: varchar('product_model_name', { length: 50 }),
     productModelDetail: varchar('product_model_detail', { length: 200 }),
@@ -665,20 +664,6 @@ export const productCompatibleModel = pgTable('product_compatible_model', {
   productPk: pkRef('product_pk'),
   modelPk: pkRef('model_pk'),
 });
-
-export const productType = pgTable(
-  'product_type',
-  {
-    pk: pkCol(),
-    id: uuidId(),
-    productTypeName: varchar('product_type_name', { length: 50 }),
-    recordStatus: varchar('record_status', { length: 10 }).notNull().default('ACTIVE'),
-    statusChangedAt: timestamp('status_changed_at', { mode: 'string' }),
-    statusChangedByAppUserPk: pkRef('status_changed_by_app_user_pk'),
-    productTypeDescription: varchar('product_type_description', { length: 500 }).notNull().default(''),
-  },
-  (table) => [uniqueIndex('ix_product_type_name').on(table.productTypeName)],
-);
 
 export const quotationLine = pgTable('quotation_line', {
   pk: pkCol(),

@@ -267,7 +267,7 @@ const logFilters = (f: Record<string, string>) => ({
   no: f.no,
 });
 
-for (const k of ['categories', 'manufacturers', 'colors', 'job_types', 'product_types', 'symptoms']) {
+for (const k of ['categories', 'manufacturers', 'colors', 'job_types', 'symptoms']) {
   SPECS[k] = { title: k, module: null, cols: MASTER_COLS };
 }
 // the reports' row-level tables (report-specs.ts), with the module each report page always exported under

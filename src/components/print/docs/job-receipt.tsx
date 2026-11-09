@@ -70,7 +70,6 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
             items={[
               { k: 'ยี่ห้อ / รุ่น', v: [j.brand, j.modelName].filter(Boolean).join(' ') },
               { k: 'รุ่นย่อย', v: j.modelDetail },
-              { k: 'ประเภทสินค้า', v: j.productType },
               { k: 'Serial No.', v: j.serial },
               { k: 'IMEI', v: j.imei },
               {

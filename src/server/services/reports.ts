@@ -20,7 +20,6 @@ import {
   product,
   productCompatibleModel,
   productStock,
-  productType,
   quotationLine,
   quotation,
   quotationStatus,
@@ -239,7 +238,6 @@ async function jobRows(p: PageQuery, limit: number, offset: number): Promise<Q> 
           imei: job.productImeiNo,
           brand: brand.brandName,
           model: jobModelName,
-          productType: productType.productTypeName,
           warranty: job.productWarranty,
           bounce: job.isJobBounce,
           jobType: jobType.jobTypeName,
@@ -281,7 +279,6 @@ async function jobRows(p: PageQuery, limit: number, offset: number): Promise<Q> 
       .leftJoin(model, eq(model.pk, job.modelPk))
       .leftJoin(brand, eq(brand.pk, model.brandPk))
       .leftJoin(symptom, eq(symptom.pk, mainSymptomPk))
-      .leftJoin(productType, eq(productType.pk, job.productTypePk))
       .leftJoin(opener, eq(opener.pk, job.createdByAppUserPk))
       .leftJoin(closer, eq(closer.pk, job.closedByAppUserPk))
       .where(w)

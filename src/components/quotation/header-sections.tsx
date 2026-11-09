@@ -176,9 +176,6 @@ export function QuotationDeviceSection({ job }: { job: JobDetail | null }) {
         <Field label="IMEI No.">
           <Input className="num" value={job?.imei ?? ''} readOnly />
         </Field>
-        <Field label="ประเภทเครื่องซ่อม">
-          <Input value={job?.productType ?? ''} readOnly />
-        </Field>
         <Field label="ยี่ห้อ">
           <Input value={job?.brand ?? ''} readOnly />
         </Field>

@@ -24,6 +24,4 @@ export const getColors = async (): Promise<MasterRow[]> =>
   newestFirst(await (await masters()).listSimple('colors', 'exclude'));
 export const getJobTypes = async (): Promise<MasterRow[]> =>
   newestFirst(await (await masters()).listSimple('job_types', 'exclude'));
-export const getProductTypes = async (): Promise<MasterRow[]> =>
-  newestFirst(await (await masters()).listSimple('product_types', 'exclude'));
 export const getSymptoms = async (): Promise<Symptom[]> => newestFirst(await (await masters()).listSymptoms('exclude'));

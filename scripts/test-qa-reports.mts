@@ -96,11 +96,9 @@ await pool.query(`
   DELETE FROM model WHERE pk = 9941 OR model_code = 'QRPM1';
   DELETE FROM customer WHERE pk = 9941 OR customer_code = 'QRPC01';
   DELETE FROM brand WHERE pk IN (9941, 9942) OR brand_name IN ('QRP Brand', 'QRP Brand 2');
-  DELETE FROM product_type WHERE pk = 9941 OR product_type_name = 'QRP Type';
   DELETE FROM job_type WHERE pk = 9941 OR job_type_name = 'QRP งานซ่อม';
 
   INSERT INTO brand (pk, brand_name) OVERRIDING SYSTEM VALUE VALUES (9941, 'QRP Brand'), (9942, 'QRP Brand 2');
-  INSERT INTO product_type (pk, product_type_name) OVERRIDING SYSTEM VALUE VALUES (9941, 'QRP Type');
   INSERT INTO job_type (pk, job_type_name) OVERRIDING SYSTEM VALUE VALUES (9941, 'QRP งานซ่อม');
   INSERT INTO model (pk, model_code, model_name, brand_pk) OVERRIDING SYSTEM VALUE VALUES (9941, 'QRPM1', 'QRP Model', 9941);
   INSERT INTO customer (pk, customer_code, customer_name, phone_number) OVERRIDING SYSTEM VALUE
@@ -122,7 +120,7 @@ await pool.query(`
     SELECT 'TST-M', 'Test model', 'ACTIVE' WHERE NOT EXISTS (SELECT 1 FROM model WHERE model_code = 'TST-M');
   INSERT INTO job (job_no, record_status, customer_pk, customer_detail, job_create_date, created_by_app_user_pk, engineer_app_user_pk,
       job_status_id, job_closed_date, closed_by_app_user_pk, job_return_date, job_repaired_date, product_warranty, is_job_bounce,
-      model_pk, product_model_name, product_type_pk, job_type_pk, job_type_detail, product_symptom_other,
+      model_pk, product_model_name, job_type_pk, job_type_detail, product_symptom_other,
       product_fault, product_equipment, job_remark, job_reception_date, job_reception_tracking_no, job_reference_no,
       product_sale_order_date, product_serial, product_imei_no, spare_part_total_cost, service_cost, service_tool_cost,
       delivery_cost, carton_box_cost, job_total_cost, job_payment_amount, job_payment_type, job_payment_no,
@@ -130,17 +128,17 @@ await pool.query(`
     VALUES
     ('QRPJ0001', 'ACTIVE', 9941, 'QRPC01 ลูกค้า QRP 0811111111', '2026-09-10 09:00', 9941, 9942,
       8, '2026-09-20 10:00', 9943, '1900-01-01', '2026-09-15 10:00', 'IN', true,
-      9941, 'QRP Model', 9941, 9941, 'ย่อย QRP', 'จอไม่ติด',
+      9941, 'QRP Model', 9941, 'ย่อย QRP', 'จอไม่ติด',
       'บอร์ด', 'สายชาร์จ', 'หมายเหตุ QRP', '2026-09-11', 'QRPTRACK1', 'SO-QRP-1',
       '2026-09-01', 'QRPSN1', '', 100, 200, 10,
       50, 20, 380, 380, 'โอน', 'PAY1',
       'โอนแล้ว', 'จอ LCD', 'เปลี่ยนจอ', 'ok'),
     ('QRPJ0002', 'ACTIVE', null, 'QRPC99 สมชาย ทดสอบ 0899999999', '2026-09-12 09:00', 9942, null,
       1, '1900-01-01', null, '1900-01-01', '1900-01-01', '', false,
-      (SELECT pk FROM model WHERE model_code = 'TST-M'), '', null, null, '', '', '', '', '', null, '', '', null, 'QRPSN2', '', 0, 0, 0, 0, 0, 0, 0, '', '', '', '', '', ''),
+      (SELECT pk FROM model WHERE model_code = 'TST-M'), '', null, '', '', '', '', '', null, '', '', null, 'QRPSN2', '', 0, 0, 0, 0, 0, 0, 0, '', '', '', '', '', ''),
     ('QRPJ0003', 'ACTIVE', 9941, 'QRPC01 ลูกค้า QRP 0811111111', '2026-10-20 09:00', 9941, null,
       5, '1900-01-01', null, '1900-01-01', '2026-10-22 10:00', 'OUT', false,
-      (SELECT pk FROM model WHERE model_code = 'TST-M'), '', null, null, '', '', '', '', '', null, '', '', null, '', '35QRP999', 0, 500, 0, 0, 0, 500, 0, '', '', '', '', '', '');
+      (SELECT pk FROM model WHERE model_code = 'TST-M'), '', null, '', '', '', '', '', null, '', '', null, '', '35QRP999', 0, 500, 0, 0, 0, 500, 0, '', '', '', '', '', '');
   INSERT INTO job_outsource (job_pk, send_to_name, send_date, receive_date)
     SELECT pk, 'ร้าน QRP', '2026-10-02 10:00', '2026-10-05 10:00' FROM job WHERE job_no = 'QRPJ0002';
 
@@ -232,7 +230,7 @@ await test('open_job: every legacy column in order, newest first, # runs on', as
   assert.deepEqual(col(rows, 'idx'), [1, 2, 3]);
   const r = rows[2]!;
   assert.deepEqual(
-    [r.openedBy, r.customerCode, r.customerName, r.phone, r.so, r.soDate, r.serial, r.brand, r.model, r.productType],
+    [r.openedBy, r.customerCode, r.customerName, r.phone, r.so, r.soDate, r.serial, r.brand, r.model],
     [
       'QRP opener',
       'QRPC01',
@@ -243,7 +241,6 @@ await test('open_job: every legacy column in order, newest first, # runs on', as
       'QRPSN1',
       'QRP Brand',
       'QRP Model',
-      'QRP Type',
     ],
   );
   assert.deepEqual(

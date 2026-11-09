@@ -7,7 +7,7 @@ import type { JobFormState, useJobForm } from '@/components/shared/job-form';
 import { Field } from '@/components/ui/field';
 import { Input, Select, Textarea, Radio, Checkbox } from '@/components/ui/input';
 import { CHANNELS, RECEIVE_METHODS, WARRANTY_OPTIONS } from '@/data/options';
-import { useApi, useManufacturers, useModels, useProductTypes, useShippingProfiles } from '@/data/db';
+import { useApi, useManufacturers, useModels, useShippingProfiles } from '@/data/db';
 import { qs } from '@/data/keys';
 import { CodeInput } from '@/components/shared/code-input';
 import { JobLinks, shopeeDateOff, thaiDate, Warn } from '@/components/jobs/job-checks';
@@ -285,22 +285,6 @@ export function ModelDetailField({ f: { s, set, errors } }: P) {
   return (
     <Field label="รุ่นย่อย (ถ้ามี)" error={errors.modelDetail}>
       <Input maxLength={200} value={s.modelDetail} onChange={(e) => set('modelDetail', e.target.value)} />
-    </Field>
-  );
-}
-
-export function ProductTypeField({ f: { s, set, errors } }: P) {
-  const { data: PRODUCT_TYPES, ...typesLookup } = useProductTypes();
-  return (
-    <Field label="ประเภทสินค้า" error={errors.productType} lookup={typesLookup}>
-      <SearchSelect
-        value={s.productType}
-        onChange={(v) => set('productType', v)}
-        options={withCurrent(
-          PRODUCT_TYPES.map((p) => ({ value: p.name, label: p.name })),
-          s.productType,
-        )}
-      />
     </Field>
   );
 }

@@ -1229,7 +1229,7 @@ test('every free-text field raised from 100: 500 accepted, 501 refused', () => {
     assert.equal(error('ก'.repeat(TEXT_MAX)), undefined, `${name} 500`);
     assert.ok(error('ก'.repeat(TEXT_MAX + 1)), `${name} 501`);
   }
-  for (const kind of ['colors', 'job_types', 'product_types', 'symptoms'] as const)
+  for (const kind of ['colors', 'job_types', 'symptoms'] as const)
     assert.equal(MASTER_DETAIL_MAX[kind], TEXT_MAX);
   for (const kind of ['categories', 'manufacturers'] as const) assert.equal(MASTER_DETAIL_MAX[kind], 50);
 });

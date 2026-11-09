@@ -32,7 +32,6 @@ const DEVICE = (warranty: string) => [
   c('serial', 'Product Serial No', undefined, 18),
   c('brand', 'Brand Name', undefined, 14),
   c('model', 'Model Name', undefined, 18),
-  c('productType', 'Product Type Name', undefined, 16),
   c('warranty', warranty, undefined, 8),
 ];
 const SYMPTOM = (name: string) => [

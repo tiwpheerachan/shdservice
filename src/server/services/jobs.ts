@@ -43,7 +43,6 @@ import {
   brand,
   model,
   product,
-  productType,
   quotation,
   shippingProfile,
   symptom,
@@ -1026,7 +1025,6 @@ export type JobDetail = {
   warrantyMonth: number;
   expireDate: string;
   warranty: string;
-  productType: string;
   imei: string;
   serial: string;
   brand: string;
@@ -1117,7 +1115,6 @@ export type JobDetail = {
 const LEGACY_KEY: Record<string, string> = {
   customerPk: 'customerId',
   jobTypePk: 'jobTypeId',
-  productTypePk: 'productTypeId',
   modelPk: 'productModelId',
   reportedSymptomPk: 'productSymptomId',
   engineerSymptomPk: 'engineerSymptomId',
@@ -1143,8 +1140,6 @@ const NAMED: Record<string, (tx: Tx) => (pk: number) => Promise<string | null>> 
         .where(eq(customer.pk, pk)),
     ),
   jobTypeId: (tx) => nameOf((pk) => tx.select({ v: jobType.jobTypeName }).from(jobType).where(eq(jobType.pk, pk))),
-  productTypeId: (tx) =>
-    nameOf((pk) => tx.select({ v: productType.productTypeName }).from(productType).where(eq(productType.pk, pk))),
   productModelId: (tx) => nameOf((pk) => tx.select({ v: model.modelCode }).from(model).where(eq(model.pk, pk))),
   engineerSymptomId: (tx) =>
     nameOf((pk) => tx.select({ v: symptom.symptomName }).from(symptom).where(eq(symptom.pk, pk))),
@@ -1194,7 +1189,6 @@ async function jobDetailRow(jobNo: string) {
       modelName: jobModelName,
       receptionShipper: receptionShipperName,
       partsReplaced: partsReplacedText,
-      productType: productType.productTypeName,
       symptomName: symptom.symptomName,
       engSymptom: engSym.symptomName,
       engId: eng.id,
@@ -1216,7 +1210,6 @@ async function jobDetailRow(jobNo: string) {
     .leftJoin(jobType, eq(jobType.pk, job.jobTypePk))
     .leftJoin(model, eq(model.pk, job.modelPk))
     .leftJoin(brand, eq(brand.pk, model.brandPk))
-    .leftJoin(productType, eq(productType.pk, job.productTypePk))
     .leftJoin(symptom, eq(symptom.pk, job.reportedSymptomPk))
     .leftJoin(engSym, eq(engSym.pk, job.engineerSymptomPk))
     .leftJoin(eng, eq(eng.pk, job.engineerAppUserPk))
@@ -1343,7 +1336,6 @@ function toJobDetail(
     warrantyMonth: j.productWarrantyMonth ?? 0,
     expireDate: fmtDate(j.productExpireDate),
     warranty: j.productWarranty ?? '',
-    productType: r.productType ?? '',
     imei: j.productImeiNo ?? '',
     serial: j.productSerial ?? '',
     brand: r.brand ?? '',
@@ -1532,15 +1524,8 @@ async function lookups(i: JobInput, prevShipper?: string | null, jobNo?: string)
   const shipper = clean(i.receptionShipper);
   const newShipper = !!shipper && shipper !== clean(prevShipper); // a legacy free-text name may stay as it is
   // the master lookups are independent: side by side
-  const [[jt], [pt], [mf], [md], syms, [sp]] = await Promise.all([
+  const [[jt], [mf], [md], syms, [sp]] = await Promise.all([
     i.jobType ? db.select({ id: jobType.pk }).from(jobType).where(nameIs(jobType.jobTypeName, i.jobType)).limit(1) : [],
-    i.productType
-      ? db
-          .select({ id: productType.pk })
-          .from(productType)
-          .where(nameIs(productType.productTypeName, i.productType))
-          .limit(1)
-      : [],
     i.brand ? db.select({ id: brand.pk }).from(brand).where(nameIs(brand.brandName, i.brand)).limit(1) : [],
     i.modelCode ? db.select({ id: model.pk }).from(model).where(nameIs(model.modelCode, i.modelCode)).limit(1) : [],
     names.length
@@ -1568,7 +1553,6 @@ async function lookups(i: JobInput, prevShipper?: string | null, jobNo?: string)
   const symIds = names.map((n) => syms.find((s) => s.name === n)?.id).filter((x): x is number => !!x);
   // a name that was sent but is not in the list is refused under its field, never saved as id 0
   const fields: FieldErrors = {};
-  if (i.productType && !pt) fields.productType = `ไม่พบประเภทสินค้า "${i.productType}" ในรายการ`;
   if (i.brand && !mf) fields.brand = `ไม่พบยี่ห้อ "${i.brand}" ในรายการ`;
   if (i.modelCode && !md) fields.modelCode = `ไม่พบรุ่น "${i.modelCode}" ในรายการ`;
   const unknown = names.filter((n) => !syms.some((s) => s.name === n));
@@ -1578,7 +1562,6 @@ async function lookups(i: JobInput, prevShipper?: string | null, jobNo?: string)
   // the brand is the model's (job has no brand column): the name is only checked
   return {
     jobTypeId: jt?.id,
-    productTypeId: pt?.id,
     modelId: md?.id,
     symIds,
     // reception courier: undefined = unchanged (the name it has now), null = cleared, else the profile picked
@@ -1959,7 +1942,6 @@ export async function createJob(i: JobInput, byUserId: number): Promise<JobDetai
         jobStatusId: JS.NEW,
         productImeiNo: cleanCode(i.imei),
         productSerial: cleanSerial(i.serial),
-        productTypePk: lk.productTypeId ?? null,
         modelPk: lk.modelId,
         productModelDetail: clean(i.modelDetail),
         productSymptomOther: clean(i.symptomOther),
@@ -2079,7 +2061,6 @@ async function applyJobEdit(
     jobTypeDetail: clean(i.jobTypeDetail),
     productImeiNo: cleanCode(i.imei),
     productSerial: cleanSerial(i.serial),
-    ...(lk.productTypeId ? { productTypePk: lk.productTypeId } : {}),
     // the model's name and brand are the model's (product_model_name: a legacy job's snapshot, stays)
     ...(lk.modelId && lk.modelId !== existing.modelPk ? { modelPk: lk.modelId } : {}),
     productModelDetail: clean(i.modelDetail),

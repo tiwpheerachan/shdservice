@@ -10549,88 +10549,6 @@
         }
       }
     },
-    "/data/product_types": {
-      "get": {
-        "tags": [
-          "Data"
-        ],
-        "summary": "Master data: product_types",
-        "description": "Any approved user.",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "active",
-                "exclude",
-                "only",
-                "all"
-              ],
-              "description": "Which record_status rows: `exclude` (default) = all but DELETED; anything else = the default."
-            },
-            "required": false,
-            "description": "Which record_status rows: `exclude` (default) = all but DELETED; anything else = the default.",
-            "name": "deleted",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The list.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/MasterRow"
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No session cookie, or one that expired / was signed out elsewhere — `{\"error\":\"unauthorized\"}`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Signed in but not approved (รอการอนุมัติสิทธิ์การใช้งาน), disabled, or the role lacks this module / action / special right.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Too many calls from this user in the window — `details.retryAfter` seconds to wait.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "The database did not answer, or the query ran too long (`57014`) — retry; narrow the range for a report.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/data/products": {
       "get": {
         "tags": [
@@ -13067,7 +12985,6 @@
                 "manufacturers",
                 "colors",
                 "job_types",
-                "product_types",
                 "symptoms"
               ]
             },
@@ -14067,7 +13984,6 @@
                       "manufacturers",
                       "colors",
                       "job_types",
-                      "product_types",
                       "symptoms",
                       "models",
                       "products",
@@ -15344,7 +15260,6 @@
                 "manufacturers",
                 "colors",
                 "job_types",
-                "product_types",
                 "symptoms",
                 "models"
               ]
@@ -17409,9 +17324,6 @@
           "warranty": {
             "type": "string"
           },
-          "productType": {
-            "type": "string"
-          },
           "imei": {
             "type": "string"
           },
@@ -17877,7 +17789,6 @@
           "warrantyMonth",
           "expireDate",
           "warranty",
-          "productType",
           "imei",
           "serial",
           "brand",
@@ -18075,9 +17986,6 @@
             ]
           },
           "warranty": {
-            "type": "string"
-          },
-          "productType": {
             "type": "string"
           },
           "imei": {

@@ -16,7 +16,6 @@ import {
   ModelDetailField,
   ModelField,
   NoteField,
-  ProductTypeField,
   ReceptionDateField,
   ReceptionTypeField,
   SaleDateField,
@@ -96,7 +95,6 @@ export type JobFormState = {
   warranty: string;
   /** Warranty was filled in from the expire date (the user has not picked it) — it keeps following it */
   warrantyAuto: boolean;
-  productType: string;
   imei: string;
   serial: string;
   brand: string;
@@ -157,7 +155,6 @@ export const EMPTY_JOB_FORM: JobFormState = {
   expireDate: '',
   warranty: '',
   warrantyAuto: false,
-  productType: '',
   imei: '',
   serial: '',
   brand: '',
@@ -223,7 +220,6 @@ export function fromJob(j: JobDetail): JobFormState {
     warrantyMonth: j.warrantyMonth == null ? '' : String(j.warrantyMonth), // 0 months is a value (the API keeps it required)
     expireDate: j.expireDate,
     warranty: j.warranty,
-    productType: j.productType,
     imei: j.imei,
     serial: j.serial,
     brand: j.brand,
@@ -272,7 +268,6 @@ export function toJobInput(s: JobFormState) {
     warrantyMonth: s.warrantyMonth,
     expireDate: s.expireDate,
     warranty: s.warranty,
-    productType: s.productType,
     imei: s.imei,
     serial: s.serial,
     brand: s.brand,
@@ -796,7 +791,6 @@ export function ProductSection({
         <WarrantyMonthField f={f} />
         <ExpireField f={f} />
         <WarrantyField f={f} />
-        <ProductTypeField f={f} />
 
         <ImeiField f={f} />
         <SerialField f={f} />

@@ -914,8 +914,8 @@ try {
     assert.equal(m2.r, long('ค'));
     assert.equal((await stock()).r, start + 1, '+2 received, -1 issued');
   });
-  await test('masters: รายละเอียด of สี / ประเภทงาน / ประเภทเครื่อง / อาการเสีย holds 500, refuses 501; หมวดหมู่ stays 50', async () => {
-    for (const kind of ['colors', 'job_types', 'product_types'] as const) {
+  await test('masters: รายละเอียด of สี / ประเภทงาน / อาการเสีย holds 500, refuses 501; หมวดหมู่ stays 50', async () => {
+    for (const kind of ['colors', 'job_types'] as const) {
       const name = `QOR ${kind} ${Date.now()}`;
       const extra = kind === 'job_types' ? { days: '3' } : {};
       const row = await saveSimple(kind, { name, detail: long('ก'), ...extra }, ADMIN.id);
