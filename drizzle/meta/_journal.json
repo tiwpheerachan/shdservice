@@ -113,6 +113,13 @@
       "when": 1762819200000,
       "tag": "0015_move_history_to_active_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1762905600000,
+      "tag": "0016_drop_product_type",
+      "breakpoints": true
     }
   ]
 }
