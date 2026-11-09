@@ -180,7 +180,6 @@ export const recordStatus = defineOperation({
         'manufacturers',
         'colors',
         'job_types',
-        'product_types',
         'symptoms',
         'models',
         'products',
@@ -225,7 +224,7 @@ export const masterSave = defineOperation({
   summary: 'Create or update master data (ข้อมูลระบบ)',
   description: `${ADMIN} Rules: \`masterSchema\` / \`modelSchema\` in src/lib/validation/admin.ts. Fields by kind: the simple lists take id, name, detail, extra, days (job types: SLA), status; \`symptoms\` adds group; \`models\` takes code, name, brand, price, status.`,
   params: z.object({
-    kind: z.enum(['categories', 'manufacturers', 'colors', 'job_types', 'product_types', 'symptoms', 'models'], {
+    kind: z.enum(['categories', 'manufacturers', 'colors', 'job_types', 'symptoms', 'models'], {
       error: (issue) => `unknown master: ${String(issue.input)}`,
     }),
   }),

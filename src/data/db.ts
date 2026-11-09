@@ -197,8 +197,6 @@ export const useColors = (mode: DeletedMode = 'active') =>
   useTable<MasterRow>('colors', undefined, mode, {}, TTL_MASTER);
 export const useJobTypes = (mode: DeletedMode = 'active') =>
   useTable<MasterRow>('job_types', undefined, mode, {}, TTL_MASTER);
-export const useProductTypes = (mode: DeletedMode = 'active') =>
-  useTable<MasterRow>('product_types', undefined, mode, {}, TTL_MASTER);
 /** `enabled: false` → nothing loaded (yet): the symptom pickers load their lists once opened / focused */
 export const useSymptoms = (mode: DeletedMode = 'active', enabled = true) =>
   useTable<Symptom>('symptoms', undefined, mode, {}, TTL_MASTER, enabled);

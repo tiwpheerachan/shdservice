@@ -165,7 +165,6 @@ const jobInputShape = z.object({
   warrantyMonth: wholeLike('รับประกัน (เดือน) '),
   expireDate: date,
   warranty: text,
-  productType: text,
   imei: text,
   serial: text,
   brand: text,

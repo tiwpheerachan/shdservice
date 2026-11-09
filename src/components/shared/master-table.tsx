@@ -26,7 +26,7 @@ import { useFilterDraft } from '@/lib/use-filter-draft';
 import { useTourRestore } from '@/components/tour/tour';
 
 /** API resource name of the master (= /api/masters/<kind>, /api/admin/records table) */
-export type MasterKind = 'categories' | 'manufacturers' | 'colors' | 'job_types' | 'product_types' | 'symptoms';
+export type MasterKind = 'categories' | 'manufacturers' | 'colors' | 'job_types' | 'symptoms';
 
 export type MasterConfig = {
   kind: MasterKind;

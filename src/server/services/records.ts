@@ -22,7 +22,6 @@ export type RecordTable =
   | 'manufacturers'
   | 'colors'
   | 'job_types'
-  | 'product_types'
   | 'symptoms'
   | 'models'
   | 'products'
@@ -37,7 +36,6 @@ export const RECORD_MODULES: Record<Exclude<RecordTable, 'users'>, Module | null
   manufacturers: null,
   colors: null,
   job_types: null,
-  product_types: null,
   symptoms: null,
   models: null,
   products: 'Product',

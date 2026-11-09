@@ -25,16 +25,34 @@ Keep: `'use client'` / `'server-only'` directives, eslint/ts directives with the
 
 Split a task by area, one agent per area, so each gets a focused brief and none of them edit the same files. Run agents in parallel only when their file sets don't overlap (e.g. auth/proxy vs. services/migrations); otherwise run them one after another. The main session writes the briefs, integrates the results, re-runs the checks itself, and ticks the plan — never trust a report without `tsc`, `eslint .`, `npm test`, `npm run test:db` passing.
 
-| Work | Use |
+| Work | Use | Effort |
+|---|---|---|
+| Question, lookup, SQL for the owner to run | no skill — read the code, answer | low |
+| Find code, trace a flow, impact of a change | `graphify` (knowledge graph — query it first when `graphify-out/` exists), then an Explore agent | low–medium |
+| Spec / break down a large task | `agent-skills:spec`, `agent-skills:plan` | high |
+| Implement / fix: one or two files, text, UI tweak | `ponytail` (smallest diff, fix the root cause where every caller passes, reuse what exists) | medium |
+| Implement / fix: several files, a bug with an unknown cause | `ponytail` + `agent-skills:build` / incremental slices, `agent-skills:debugging-and-error-recovery` | high |
+| Migration, production data, money / stock, deleting a table or column | `agent-skills:deprecation-and-migration` + `agent-skills:doubt-driven-development` | high (xhigh: ask) |
+| Tests | `agent-skills:test` (bug → failing test first), `agent-skills:test-engineer` for coverage | high |
+| Review before merge | `agent-skills:code-reviewer` (`/review`), `ponytail:ponytail-review` (over-engineering), `ponytail:ponytail-audit` (whole repo) | high |
+| Security (auth, uploads, `/track`, anything public) | `security-audit` skill (Cloudflare) + `agent-skills:security-auditor` | high (xhigh: ask) |
+| UI / QA in a real browser | `agent-browser` + `dogfood` (exploratory QA with repro screenshots), [Tencent BrowserSkill](https://github.com/Tencent/BrowserSkill) for the logged-in Chromium — against `npm run dev` + dev DB, never production data | medium |
+| Web performance | `agent-skills:web-performance-auditor` | high |
+| Docs / ADR | `agent-skills:documentation-and-adrs` | medium |
+
+Effort is the level for the session or the agent doing that work; a mixed task takes the level of its riskiest part. **high is the ceiling.** Anything above it (`xhigh`, `max`, `/code-review ultra`) costs much more time and tokens for a small gain, so always ask the owner first: name the level, why this task needs it, and what high would miss — and go on at high unless the owner says yes. It is worth asking only for an irreversible migration / data fix touching money, stock or many rows (like 0011–0015), or a full security audit of a public surface (`/track`, uploads, auth). The checks (backup, `tsc`, `eslint .`, `npm test`, `npm run test:db`, review, the owner running production migrations) are what keep risky work safe, not a higher effort.
+
+Licenses: prefer free, MIT-licensed skills; Apache-2.0 is accepted where no MIT equivalent exists (free for commercial use, keep its NOTICE). Check the LICENSE before installing a new skill — none, or GPL / non-commercial → ask the owner first.
+
+| Skill | License |
 |---|---|
-| Find code, trace a flow, impact of a change | `graphify` (knowledge graph — query it first when `graphify-out/` exists), then an Explore agent |
-| Spec / break down a large task | `agent-skills:spec`, `agent-skills:plan` |
-| Implement / fix | `ponytail` (smallest diff, fix the root cause where every caller passes, reuse what exists) + `agent-skills:build` / incremental slices |
-| Tests | `agent-skills:test` (bug → failing test first), `agent-skills:test-engineer` for coverage |
-| Review before merge | `agent-skills:code-reviewer` (`/review`), `ponytail:ponytail-review` (over-engineering), `ponytail:ponytail-audit` (whole repo) |
-| Security (auth, uploads, `/track`, anything public) | `security-audit` skill (Cloudflare) + `agent-skills:security-auditor` |
-| UI / QA in a real browser | `agent-browser` + `dogfood` (exploratory QA with repro screenshots), [Tencent BrowserSkill](https://github.com/Tencent/BrowserSkill) for the logged-in Chromium — against `npm run dev` + dev DB, never production data |
-| Web performance | `agent-skills:web-performance-auditor` |
+| `agent-skills:*` (Addy Osmani) | MIT |
+| `ponytail:*` | MIT |
+| `security-audit` (Cloudflare) | MIT |
+| `graphify` | Apache-2.0 |
+| `agent-browser`, `dogfood` (Vercel Labs) | Apache-2.0 |
+| Tencent BrowserSkill | not checked — confirm before relying on it |
+| `/code-review`, `/simplify`, `/run`, Explore agent | built into Claude Code |
 
 Every agent brief states: the files it owns (and the ones it must not touch), that `.env` is production and only local DBs may be used, that it must not commit, and that it reports file:line, what it skipped and why, and the check results. Areas already in progress are listed in [docs/production-readiness.md](docs/production-readiness.md).
 

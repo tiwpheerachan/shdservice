@@ -107,7 +107,7 @@ resource('permissions', 'The permission matrix', ADMIN, list(Permission));
 resource('roles', 'Role names (user_type)', ADMIN, strings);
 resource('modules', 'Module names', ADMIN, strings);
 
-for (const kind of ['categories', 'manufacturers', 'colors', 'job_types', 'product_types'] as const)
+for (const kind of ['categories', 'manufacturers', 'colors', 'job_types'] as const)
   resource(kind, `Master data: ${kind}`, ANY, list(MasterRow), { deleted: deletedMode });
 resource('symptoms', 'Master data: symptoms', ANY, list(Symptom), { deleted: deletedMode });
 resource(
@@ -446,7 +446,6 @@ export const exportXlsx = defineOperation({
         'manufacturers',
         'colors',
         'job_types',
-        'product_types',
         'symptoms',
       ],
       { error: (issue) => `unknown export: ${String(issue.input)}` },

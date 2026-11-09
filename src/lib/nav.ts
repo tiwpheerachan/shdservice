@@ -28,7 +28,6 @@ export const NAV: NavGroup[] = [
       { title: 'รุ่นสินค้า', href: '/admin/models' },
       { title: 'สีสินค้า', href: '/admin/colors' },
       { title: 'ประเภทงานซ่อม', href: '/admin/job-types' },
-      { title: 'ประเภทเครื่องซ่อม', href: '/admin/product-types' },
       { title: 'อาการเสีย มาตรฐาน', href: '/admin/symptoms' },
       { title: 'โปรไฟล์ผู้ออกเอกสาร', href: '/admin/document-profiles' },
       { title: 'โปรไฟล์บริษัทขนส่ง', href: '/admin/shipping-profiles' },

@@ -21,7 +21,6 @@ export const MASTER_NAME_LABEL = {
   manufacturers: 'ชื่อยี่ห้อ',
   colors: 'ชื่อสี',
   job_types: 'ประเภทงานซ่อม',
-  product_types: 'ประเภทเครื่องซ่อม',
   symptoms: 'อาการเสีย',
 } as const;
 
@@ -31,7 +30,6 @@ export const MASTER_DETAIL_MAX: Record<keyof typeof MASTER_NAME_LABEL, number> =
   manufacturers: 50,
   colors: TEXT_MAX,
   job_types: TEXT_MAX,
-  product_types: TEXT_MAX,
   symptoms: TEXT_MAX,
 };
 

@@ -113,7 +113,6 @@ export const JobDetail = z
     warrantyMonth: n,
     expireDate: s,
     warranty: s,
-    productType: s,
     imei: s,
     serial: s,
     brand: s,

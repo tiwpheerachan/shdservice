@@ -11,7 +11,6 @@ import {
   jobStatus,
   jobType,
   model,
-  productType,
   quotationStatus,
   rolePermission,
   securityLog,
@@ -640,11 +639,6 @@ const ID_NAMES: Record<string, (ids: number[]) => Promise<{ id: string | number;
   // by the integer keys the audit rows hold (the master lists answer uuids)
   jobTypeId: (ids) =>
     db.select({ id: jobType.pk, name: jobType.jobTypeName }).from(jobType).where(inArray(jobType.pk, ids)),
-  productTypeId: (ids) =>
-    db
-      .select({ id: productType.pk, name: productType.productTypeName })
-      .from(productType)
-      .where(inArray(productType.pk, ids)),
   productBrandId: (ids) => db.select({ id: brand.pk, name: brand.brandName }).from(brand).where(inArray(brand.pk, ids)),
   productSymptomId: (ids) => symptomNames(ids),
   engineerSymptomId: (ids) => symptomNames(ids),
