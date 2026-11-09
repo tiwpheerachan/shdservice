@@ -1852,13 +1852,7 @@ try {
         'warrantyMonth',
       ]);
       // the master-list checks answer once the formats are right
-      const m = await fieldsOf(
-        updateJob(
-          JOB_LEGACY,
-          { ...base, receptionShipper: 'TD ขนส่งไม่มีจริง' },
-          U.admin.id,
-        ),
-      );
+      const m = await fieldsOf(updateJob(JOB_LEGACY, { ...base, receptionShipper: 'TD ขนส่งไม่มีจริง' }, U.admin.id));
       assert.deepEqual(Object.keys(m.fields ?? {}).sort(), ['receptionShipper']);
       assert.notEqual((await row(JOB_LEGACY)).remark, 'TD junk');
     });

@@ -231,17 +231,7 @@ await test('open_job: every legacy column in order, newest first, # runs on', as
   const r = rows[2]!;
   assert.deepEqual(
     [r.openedBy, r.customerCode, r.customerName, r.phone, r.so, r.soDate, r.serial, r.brand, r.model],
-    [
-      'QRP opener',
-      'QRPC01',
-      'ลูกค้า QRP',
-      '0811111111',
-      'SO-QRP-1',
-      '2026-09-01',
-      'QRPSN1',
-      'QRP Brand',
-      'QRP Model',
-    ],
+    ['QRP opener', 'QRPC01', 'ลูกค้า QRP', '0811111111', 'SO-QRP-1', '2026-09-01', 'QRPSN1', 'QRP Brand', 'QRP Model'],
   );
   assert.deepEqual(
     [r.warranty, r.bounce, r.jobType, r.jobTypeDetail, r.engineer, r.tracking, r.symptomOther, r.fault, r.equipment],

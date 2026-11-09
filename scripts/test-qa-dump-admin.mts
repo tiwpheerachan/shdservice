@@ -219,19 +219,17 @@ try {
   type Save = (key?: string) => Promise<string>;
   const same = `QA-dump same ${rand}`;
   const unchanged: [string, Save][] = [
-    ...(['categories', 'manufacturers', 'colors', 'job_types'] as const).map(
-      (kind): [string, Save] => [
-        kind,
-        async (id) =>
-          (
-            await saveSimple(
-              kind,
-              { id, name: same, status: 'Active', ...(kind === 'job_types' ? { days: '1' } : {}) },
-              U.admin.id,
-            )
-          ).id,
-      ],
-    ),
+    ...(['categories', 'manufacturers', 'colors', 'job_types'] as const).map((kind): [string, Save] => [
+      kind,
+      async (id) =>
+        (
+          await saveSimple(
+            kind,
+            { id, name: same, status: 'Active', ...(kind === 'job_types' ? { days: '1' } : {}) },
+            U.admin.id,
+          )
+        ).id,
+    ]),
     ['symptom', async (id) => (await saveSymptom({ id, name: same, status: 'Active' }, U.admin.id)).id],
     [
       'model',
