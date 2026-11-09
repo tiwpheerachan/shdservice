@@ -189,9 +189,12 @@ const tsOrNull = (v: unknown): string | null => {
   const t = dateOrSentinel(v);
   return t === SENTINEL_TS ? null : t;
 };
-/** the job's model is called `name` (jobModelName, no join needed) */
+/** the job's model is called `name` (jobModelName, no join needed) — spelled out so model_pk / product_model_name
+ *  indexes serve it: the coalesce of a per-row subquery read every job (~0.9 s) */
 export const jobModelIs = (name: string) =>
-  sql`coalesce((select nullif(btrim(m.model_name), '') from model m where m.pk = ${job.modelPk}), ${job.productModelName}) = ${name}`;
+  sql`(${job.modelPk} = ANY(ARRAY(select m.pk from model m where btrim(m.model_name) = ${name}))
+    or (${job.productModelName} = ${name}
+      and ${job.modelPk} = ANY(ARRAY(select m.pk from model m where nullif(btrim(m.model_name), '') is null))))`;
 /** อะไหล่ที่เปลี่ยน: a legacy job's text (job.spare_part_replace), else — a new job — the parts issued to it (job_part) */
 export const partsReplacedText = sql<
   string | null
@@ -759,6 +762,11 @@ const customerPhoneHas = (digits: string) =>
  */
 const customerNow = (cond: SQL | undefined) =>
   sql`${job.customerPk} = ANY(ARRAY(select ${customer.pk} from ${customer} where ${cond}))`;
+/**
+ * Jobs matching a text search, found through its trigram indexes first. Inline, the planner guesses ~600 matches and
+ * walks ix_job_create_date backwards for the page, filtering every job when the real match is 1–2 (0.1–1.6 s).
+ */
+const textMatch = (cond: SQL | undefined) => sql`${job.pk} = ANY(ARRAY(select ${job.pk} from ${job} where ${cond}))`;
 
 const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.trim());
 /** app_user.pk of the user whose uuid is `id` (a filter's value: no such user → matches nothing) */
@@ -780,22 +788,24 @@ export function jobWhere(q: string, f: JobFilters) {
     // the status ยกเลิกข้อมูล (0) asks for them
     f.includeCancelled || f.statusId === JS.CANCELLED ? undefined : ne(job.recordStatus, RS.DELETED),
     term
-      ? or(
-          ilike(job.jobNo, likeTerm(term)),
-          ilike(job.customerDetail, likeTerm(term)),
-          ilike(job.jobReferenceNo, likeTerm(term)),
-          ilike(job.productImeiNo, likeTerm(term)),
-          ilike(job.productSerial, likeTerm(term)),
-          ilike(job.productModelName, likeTerm(term)),
-          sql`${job.modelPk} = ANY(ARRAY(select ${model.pk} from ${model} where ${ilike(model.modelName, likeTerm(term))}))`,
-          termDigits.length >= 4
-            ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\\D', '', 'g') LIKE ${'%' + termDigits + '%'}`
-            : undefined,
-          customerNow(
-            or(
-              ilike(customer.customerName, likeTerm(term)),
-              ilike(customer.customerCode, likeTerm(term)), // customer_detail ("code name phone") of a new job is NULL
-              termDigits.length >= 4 ? customerPhoneHas(termDigits) : undefined,
+      ? textMatch(
+          or(
+            ilike(job.jobNo, likeTerm(term)),
+            ilike(job.customerDetail, likeTerm(term)),
+            ilike(job.jobReferenceNo, likeTerm(term)),
+            ilike(job.productImeiNo, likeTerm(term)),
+            ilike(job.productSerial, likeTerm(term)),
+            ilike(job.productModelName, likeTerm(term)),
+            sql`${job.modelPk} = ANY(ARRAY(select ${model.pk} from ${model} where ${ilike(model.modelName, likeTerm(term))}))`,
+            termDigits.length >= 4
+              ? sql`regexp_replace(coalesce(${job.customerDetail}, ''), '\\D', '', 'g') LIKE ${'%' + termDigits + '%'}`
+              : undefined,
+            customerNow(
+              or(
+                ilike(customer.customerName, likeTerm(term)),
+                ilike(customer.customerCode, likeTerm(term)), // customer_detail ("code name phone") of a new job is NULL
+                termDigits.length >= 4 ? customerPhoneHas(termDigits) : undefined,
+              ),
             ),
           ),
         )
