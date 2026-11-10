@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { appUser, rolePermission } from '@/db/schema';
+import { invalidate } from '@/server/cache';
 import {
   guardDenied,
   need,
@@ -322,6 +323,10 @@ export async function requireAdmin(req: NextRequest): Promise<CurrentUser> {
   return u;
 }
 
+/** cache keys (prefixes) any job / quotation / sale-order / stock write can change: the counts on screen, and the
+ *  parts pickers' catalog (it carries คงเหลือ and the price) */
+export const AFTER_WRITE = ['dashboard:', 'jobs:stats', 'alerts:', 'master:products:lite'];
+
 /**
  * Runs the route in its request context (audit() / security() / assertActor() read it) and logs a refusal
  * assertActor() made inside a write, after its transaction rolled back. Outside production every answer is checked
@@ -335,6 +340,10 @@ export function checked<T extends unknown[]>(fn: (...args: T) => Promise<Respons
     return runInRequest(req, async () => {
       try {
         const res = await fn(...args);
+        // a write that went through (its transaction committed): the counts and stock on screen are read again, so
+        // the dashboard / the list's chips / the bells / a parts picker right after a save show the new ones — the
+        // TTL only covers SQL edits
+        if (res.ok && req.method !== 'GET' && req.method !== 'HEAD') for (const k of AFTER_WRITE) invalidate(k);
         if (check) await (await import('@/server/contract/check')).checkResponse(req, res);
         return res;
       } finally {
