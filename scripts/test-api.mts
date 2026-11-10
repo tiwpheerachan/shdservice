@@ -448,8 +448,26 @@ try {
   await expect([404], '/api/jobs/J%25zz'); // a literal % (Next hands the segment over decoded once): no URIError
   await expect([404], '/api/jobs/TDJ0004/calls');
   await expect([200], `${J4}/calls`);
-  await expect([200], `${J4}/calls`, { method: 'POST', body: { detail: 'โทรแจ้งลูกค้าแล้ว (test-api)' } });
-  await expect([400], `${J4}/calls`, { method: 'POST', body: { detail: '' } });
+  await test('a write that went through drops the cached counts and parts stock (dashboard, chips, bells, pickers); a read or a refused write keeps them', async () => {
+    const { cached } = await import('@/server/cache');
+    const { AFTER_WRITE } = await import('@/server/auth');
+    const seed = () => Promise.all(AFTER_WRITE.map((k) => cached(`${k}test-api`, 60_000, async () => 'old')));
+    const now = () => Promise.all(AFTER_WRITE.map((k) => cached(`${k}test-api`, 60_000, async () => 'new')));
+    await seed();
+    await expect([200], `${J4}/calls`);
+    await expect([400], `${J4}/calls`, { method: 'POST', body: { detail: '' } });
+    assert.deepEqual(
+      await now(),
+      AFTER_WRITE.map(() => 'old'),
+      'a read / a refused write leaves them',
+    );
+    await expect([200], `${J4}/calls`, { method: 'POST', body: { detail: 'โทรแจ้งลูกค้าแล้ว (test-api)' } });
+    assert.deepEqual(
+      await now(),
+      AFTER_WRITE.map(() => 'new'),
+      'the save drops them: the next read is fresh',
+    );
+  });
   await expect([200], '/api/jobs/assign', {
     method: 'POST',
     body: {
