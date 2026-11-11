@@ -23,9 +23,9 @@ services:
     # (verdict in the body) so a Supabase blip never makes Render cycle the only instance.
     healthCheckPath: /api/health
     envVars:
-      # Node 24 = Active LTS (supported to 2028-04); Next 16 needs >= 20.9. Node 20 ended 2026-04.
+      # Node 26 = Active LTS; major only so each deploy picks up the latest security patch. Next 16 needs >= 20.9.
       - key: NODE_VERSION
-        value: '24'
+        value: '26'
       # @hrefcl/apidoc (the /api-docs build in `npm run build`) depends on puppeteer; no browser is needed
       - key: PUPPETEER_SKIP_DOWNLOAD
         value: 'true'
