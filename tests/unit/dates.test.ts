@@ -21,7 +21,7 @@ test('typing builds dd/mm/yyyy', () => {
     ['2026-10-05', '05/10/2026'],
     ['ab', ''],
   ])
-    assert.equal(maskDmy(typed!), shown, typed);
+    assert.equal(maskDmy(typed!), shown, typed!);
 });
 
 test('the day comes first: 05/10 is 5 October, never 10 May', () => {

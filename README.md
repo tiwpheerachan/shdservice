@@ -17,7 +17,7 @@ npm run dev                                          # http://localhost:3000
 `.env` = ค่าของ **production** (SSO, CENTRAL_API_KEY ฯลฯ) — `npm run dev` อ่านมันด้วย แต่ `.env.development.local` ทับ DB/Storage/Turnstile/SMS
 ⚠️ `npm run build && npm start` ในเครื่อง = NODE_ENV=production อ่าน `.env` → **ต่อ DB production จริง** (ไม่มีตัวกัน) — production migrate เองตอน deploy, ไม่ต้องรัน `db:migrate` จากเครื่อง
 
-> ต้องใช้ Node.js 24 LTS (`.nvmrc`) — Render ใช้ 24
+> ต้องใช้ Node.js 26 LTS (`.nvmrc`) — Render ใช้ 26 (ตั้ง `NODE_VERSION` ใน dashboard)
 
 > ทำไมระบบเป็นแบบนี้ (เวลาไทยใน DB, soft delete, cache ใน memory, /track fail-closed, กันลบ DB production): [`adr/`](adr/README.md)
 

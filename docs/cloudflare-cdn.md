@@ -119,7 +119,7 @@ Worker ส่งเฉพาะ `Content-Type` ที่เป็นวิดี
 (วิดีโอ ≤ 15 นาที, ภาพตัวอย่าง ≤ 24 ชม. — เท่ากับลิงก์ R2 ตรงเดิม) เพราะสำเนาใน cache ไม่ถาม R2 อีก
 สำเนาที่ค้างใน cache (≤ 30 วัน) เข้าถึงไม่ได้ถ้าไม่มีลายเซ็นที่ยังไม่หมดอายุ — จึงไม่ต้องมีระบบล้าง cache
 
-ต้องมี: Node 20+ บนเครื่อง, บัญชี Cloudflare ที่ดูแลโซน `shd-technology.co.th` และ bucket R2 เดียวกับ `R2_BUCKET` บน Render
+ต้องมี: Node 26 (`.nvmrc`) บนเครื่อง, บัญชี Cloudflare ที่ดูแลโซน `shd-technology.co.th` และ bucket R2 เดียวกับ `R2_BUCKET` บน Render
 และ **ต้องไม่มี DNS record ชื่อ `media-oneservice` อยู่ก่อน** (Custom Domain จะสร้าง record + ใบรับรองให้เอง)
 
 ```sh
