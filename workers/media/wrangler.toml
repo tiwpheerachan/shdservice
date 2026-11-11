@@ -1,0 +1,17 @@
+# Cloudflare Worker for media-oneservice.shd-technology.co.th: job videos from R2 via the edge cache.
+# Deploy: docs/cloudflare-cdn.md (section 5). The account comes from `wrangler login`; nothing account-specific here.
+# Secret (never in this file): npx wrangler secret put MEDIA_SIGNING_KEY  (the same value as MEDIA_SIGNING_KEY on Render)
+name = "oneservice-media"
+main = "src/index.ts"
+compatibility_date = "2026-10-31"
+workers_dev = false    # only the custom domain: the Cache API works there, and no second hostname to guard
+preview_urls = false
+
+routes = [{ pattern = "media-oneservice.shd-technology.co.th", custom_domain = true }]
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "oneservicevideos"   # = R2_BUCKET on Render
+
+[vars]
+APP_ORIGIN = "https://oneservice.shd-technology.co.th"   # the only origin CORS allows

@@ -1,68 +1,86 @@
-import { cn } from "@/lib/utils";
+import { cva, type VariantProps } from 'class-variance-authority';
+import { cn } from '@/lib/utils';
+import { JOB_GROUP } from '@/lib/status-ids';
 
-export type Tone =
-  | "neutral"
-  | "primary"
-  | "success"
-  | "warning"
-  | "danger"
-  | "info";
+export type Tone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
 
-const tones: Record<Tone, string> = {
-  neutral: "bg-muted text-muted-foreground border-border",
-  primary: "bg-primary-soft text-primary border-primary/25",
-  success: "bg-success-soft text-success border-success/25",
-  warning: "bg-warning-soft text-warning border-warning/25",
-  danger: "bg-danger-soft text-danger border-danger/25",
-  info: "bg-info-soft text-info border-info/25",
-};
+export const badgeVariants = cva(
+  'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs font-medium leading-4 whitespace-nowrap',
+  {
+    variants: {
+      tone: {
+        neutral: 'bg-muted text-muted-foreground border-border',
+        primary: 'bg-primary-soft text-primary border-primary/25',
+        success: 'bg-success-soft text-success border-success/25',
+        warning: 'bg-warning-soft text-warning border-warning/25',
+        danger: 'bg-danger-soft text-danger border-danger/25',
+        info: 'bg-info-soft text-info border-info/25',
+      },
+    },
+    defaultVariants: { tone: 'neutral' },
+  },
+);
 
 export function Badge({
-  tone = "neutral",
+  tone,
   dot,
+  wrap,
   className,
   children,
-}: {
-  tone?: Tone;
+}: VariantProps<typeof badgeVariants> & {
   dot?: boolean;
+  /** for table columns: long text takes 2 lines instead of forcing the column wide */
+  wrap?: boolean;
   className?: string;
   children: React.ReactNode;
 }) {
+  // no value (e.g. a job without a job type) → a quiet dash, not an empty pill that looks like a loading bar
+  if (isEmpty(children)) return <span className="text-muted-foreground">—</span>;
   return (
     <span
+      data-slot="badge"
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-2xs font-medium leading-4 whitespace-nowrap",
-        tones[tone],
-        className
+        badgeVariants({ tone }),
+        wrap && 'items-start whitespace-normal rounded-lg [&>[data-dot]]:mt-[5px]',
+        className,
       )}
     >
-      {dot && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+      {dot && <span data-dot className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />}
       {children}
     </span>
   );
 }
 
-const JOB_TONE: Record<string, Tone> = {
-  "งานใหม่": "info",
-  "อยู่ระหว่างดำเนินการ": "warning",
-  "รอลูกค้าตอบกลับ": "warning",
-  "รออะไหล่": "warning",
-  "รออนุมัติ": "warning",
-  "ส่งซ่อม Out-Source": "info",
-  "ซ่อมเสร็จ": "success",
-  "ปิดงาน": "success",
-  "ส่งคืนลูกค้าแล้ว": "success",
-  "อนุมัติ": "success",
-  "ยกเลิก": "danger",
-  "ไม่อนุมัติ": "danger",
-  Active: "success",
-  Inactive: "neutral",
-  Cancel: "danger",
-};
+const isEmpty = (c: React.ReactNode): boolean =>
+  c === null ||
+  c === undefined ||
+  c === false ||
+  (typeof c === 'string' && c.trim() === '') ||
+  (Array.isArray(c) && c.every(isEmpty));
 
-export function StatusBadge({ status }: { status: string }) {
+/** a job status's colour, from its job_status_group — the dashboard KPI cards' colours (server
+ *  computeDashboard). "ยกเลิกซ่อม (ลูกค้าไม่ตกลงซ่อม)" (6) counts as Cancel, like the server's kpiGroup. */
+export function jobTone(status: string, group?: string): Tone {
+  if (status.startsWith('ยกเลิกซ่อม')) return 'danger';
+  if (status === 'งานใหม่') return 'primary'; // new job stands out from the rest of Pending
+  switch (group?.trim()) {
+    case JOB_GROUP.PENDING:
+      return 'warning';
+    case JOB_GROUP.REPAIRED:
+      return 'info';
+    case JOB_GROUP.FINISHED:
+      return 'success';
+    case JOB_GROUP.CANCEL:
+      return 'danger';
+    default:
+      return 'neutral';
+  }
+}
+
+/** `group` = the row's statusGroup; `wrap` (table columns): a long status ("อยู่ระหว่างการซ่อม - เริ่มเบิกอะไหล่") takes 2 lines */
+export function StatusBadge({ status, group, wrap }: { status: string; group?: string; wrap?: boolean }) {
   return (
-    <Badge tone={JOB_TONE[status] ?? "neutral"} dot>
+    <Badge tone={jobTone(status, group)} dot wrap={wrap}>
       {status}
     </Badge>
   );
