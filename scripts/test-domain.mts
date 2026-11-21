@@ -4532,8 +4532,15 @@ try {
       assert.deepEqual([a.status, b.status], [201, 201], JSON.stringify([a.body, b.body]));
       const codes = [a.body.row, b.body.row].map((r) => (r as { code: string }).code);
       const found = (await listCustomers({ q: branch })).map((c) => c.code);
-      assert.ok(codes.every((c) => found.includes(c)), 'a search by the branch number finds both');
-      assert.equal((await save({ name: 'TD สาขา ค', phone: p1, branchPhone: branch })).status, 409, 'own phone still unique');
+      assert.ok(
+        codes.every((c) => found.includes(c)),
+        'a search by the branch number finds both',
+      );
+      assert.equal(
+        (await save({ name: 'TD สาขา ค', phone: p1, branchPhone: branch })).status,
+        409,
+        'own phone still unique',
+      );
       assert.equal((await save({ name: 'TD สาขา ง', phone: `06${rnd(8)}`, branchPhone: '12' })).status, 400);
       await pool.query(`DELETE FROM customer WHERE customer_code = ANY($1)`, [codes]);
     });
