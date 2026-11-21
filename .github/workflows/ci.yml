@@ -1,4 +1,4 @@
-# Every pull request and every push to yuu (the branch Render deploys): the checks
+# Every pull request and every push to develop or release (release = the branch Render deploys): the checks
 # on a clean machine. Nothing here deploys. Render waits for this run only when its
 # dashboard has Auto-Deploy = "After CI Checks Pass" (render.yaml is not synced).
 #
@@ -10,7 +10,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [yuu]
+    branches: [develop, release]
 
 concurrency:
   group: ci-${{ github.ref }}

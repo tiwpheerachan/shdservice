@@ -7,7 +7,7 @@ services:
     runtime: node
     region: singapore
     plan: starter
-    branch: yuu
+    branch: release
     # deploy only commits whose GitHub Actions run (.github/workflows/ci.yml) passed
     autoDeployTrigger: checksPass
     # --include=dev ensures TypeScript/Tailwind (devDependencies) are available for the build

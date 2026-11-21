@@ -53,7 +53,7 @@ npm run dev                                          # http://localhost:3000
 รันไฟล์เดียว / เคสเดียว: `npx vitest run tests/unit/auth.test.mts` · `npx vitest run tests/unit/schemas.test.mts -t 'tax ID'` · เทสต์ใหม่ที่ไม่ใช้ DB → `tests/unit/<ชื่อ>.test.ts` (`import { test } from 'vitest'`) · ที่ใช้ DB ยังอยู่ใน `scripts/test-*.mts` จนกว่าจะย้าย ([adr/0010](adr/0010-vitest-test-runner.md))
 
 test ที่ใช้ DB / e2e **ปฏิเสธทุก DB ที่ไม่ใช่ localhost `*_test`** (`tests/db-url.mts`) — ไม่อ่าน `.env` เลย · test:db กับ e2e ใช้ DB เดียวกัน รันทีละอย่าง
-CI (`.github/workflows/ci.yml`) รันทุก PR และทุก push ไป `yuu`: lint → tsc → `npm test` → migrate + รันซ้ำทั้งหมด (`--reset`) → `test:db` → `npm audit` (high) → build · job `e2e` (Playwright) · gitleaks
+CI (`.github/workflows/ci.yml`) รันทุก PR และทุก push ไป `develop` และ `release` (Render deploy จาก `release`): lint → tsc → `npm test` → migrate + รันซ้ำทั้งหมด (`--reset`) → `test:db` → `npm audit` (high) → build · job `e2e` (Playwright) · gitleaks
 
 ## ฐานข้อมูล (drizzle + migrations)
 
