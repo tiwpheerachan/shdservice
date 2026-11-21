@@ -50,7 +50,7 @@
     "lru-cache": "11.5.3",
     "lucide-react": "0.469.0",
     "mediabunny": "1.61.4",
-    "next": "16.4.3",
+    "next": "16.4.6",
     "pg": "8.23.0",
     "radix-ui": "1.6.7",
     "react": "19.2.8",
@@ -74,7 +74,7 @@
     "dompurify": "3.4.17",
     "drizzle-kit": "0.31.10",
     "eslint": "9.39.5",
-    "eslint-config-next": "16.4.3",
+    "eslint-config-next": "16.4.6",
     "eslint-config-prettier": "10.1.8",
     "postcss": "8.5.28",
     "prettier": "3.9.9",
@@ -82,7 +82,7 @@
     "tailwindcss": "4.3.3",
     "tsx": "4.23.13",
     "typescript": "5.7.3",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   },
   "engines": {
     "node": ">=26"
