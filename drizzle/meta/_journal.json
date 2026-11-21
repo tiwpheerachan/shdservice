@@ -127,6 +127,13 @@
       "when": 1762992000000,
       "tag": "0017_customer_branch_phone",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1763078400000,
+      "tag": "0018_drop_unused_indexes",
+      "breakpoints": true
     }
   ]
 }
