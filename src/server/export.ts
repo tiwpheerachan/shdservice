@@ -93,6 +93,7 @@ const SPECS: Record<string, { title: string; module: Module | null; cols: Col[] 
       { key: 'taxId', header: 'เลขบัตร/ผู้เสียภาษี', width: 18 },
       { key: 'address', header: 'ที่อยู่', width: 50 },
       { key: 'phone', header: 'โทรศัพท์', width: 14 },
+      { key: 'branchPhone', header: 'เบอร์สาขา', width: 14 },
       { key: 'email', header: 'อีเมล', width: 26 },
       { key: 'line', header: 'Line ID', width: 16 },
       { key: 'type', header: 'ประเภท', width: 12 },

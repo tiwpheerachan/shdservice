@@ -142,10 +142,13 @@ export function CustomerSelect({
           <Field label="เบอร์โทรศัพท์" required>
             <Input readOnly value={c.phone ?? ''} placeholder="—" className="num" />
           </Field>
+          <Field label="เบอร์สาขา">
+            <Input readOnly value={c.branchPhone ?? ''} placeholder="—" className="num" />
+          </Field>
           <Field label="Line ID">
             <Input readOnly value={c.line ?? ''} placeholder="—" />
           </Field>
-          <Field label="Email" className="lg:col-span-2">
+          <Field label="Email">
             {/* the address only after hydration — never in the server HTML (src/lib/obscure.ts) */}
             <Input readOnly value={hydrated ? (c.email ?? '') : ''} placeholder="—" />
           </Field>
@@ -224,7 +227,7 @@ export function CustomerSelect({
         <div className="space-y-4 rounded-lg border border-primary/30 bg-primary-soft/30 p-4">
           <p className="flex items-center gap-2 text-sm font-medium">
             <UserRoundPlus className="h-4 w-4 text-primary" /> เพิ่มลูกค้าใหม่ — รหัสลูกค้าจะถูกสร้างอัตโนมัติ ·
-            เบอร์โทร / อีเมล / เลขบัตร ต้องไม่ซ้ำกับลูกค้าเดิม
+            เบอร์โทร / อีเมล / เลขบัตร ต้องไม่ซ้ำกับลูกค้าเดิม (เบอร์สาขาซ้ำได้)
           </p>
           <CustomerFields
             form={form}

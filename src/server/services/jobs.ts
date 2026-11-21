@@ -1024,6 +1024,7 @@ export type JobDetail = {
     taxId: string;
     address: string;
     phone: string;
+    branchPhone: string;
     line: string;
     email: string;
   } | null;
@@ -1334,6 +1335,7 @@ function toJobDetail(
           taxId: cust.taxId,
           address: cust.address,
           phone: cust.phone,
+          branchPhone: cust.branchPhone ?? '',
           line: cust.line,
           email: cust.email,
         }

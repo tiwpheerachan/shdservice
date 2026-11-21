@@ -109,7 +109,7 @@ test('the staff receipt prints the parcel frame: sender, customer address, order
   await expect(frame).toContainText('กรุณานำส่ง');
   await expect(frame).toContainText(`ลูกค้า ${no}`);
   await expect(frame).toContainText(address);
-  await expect(frame).toContainText('โทร.081-000-9002');
+  await expect(frame).toContainText('เบอร์โทรศัพท์ 081-000-9002');
   // the address as it is: no "ต. อ. จ." line under it
   await expect(frame).not.toContainText('ต.');
 

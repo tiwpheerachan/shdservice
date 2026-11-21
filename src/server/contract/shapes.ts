@@ -19,6 +19,7 @@ export const Customer = z
     name: s,
     address: s,
     phone: s,
+    branchPhone: s.optional().meta({ description: 'เบอร์สาขา — may be shared by several customers.' }),
     email: s,
     line: s,
     taxId: s,
@@ -104,7 +105,9 @@ export const JobDetail = z
     createByName: s,
     jobType: s,
     jobTypeDetail: s,
-    customer: z.object({ id: u, code: s, name: s, taxId: s, address: s, phone: s, line: s, email: s }).nullable(),
+    customer: z
+      .object({ id: u, code: s, name: s, taxId: s, address: s, phone: s, branchPhone: s, line: s, email: s })
+      .nullable(),
     customerDetail: s,
     so: s,
     channel: s,

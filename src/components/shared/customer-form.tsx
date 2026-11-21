@@ -34,6 +34,7 @@ export type CustomerFormValues = {
   subDistrictId: string;
   postalCode: string;
   phone: string;
+  branchPhone: string;
   email: string;
   line: string;
   priceGroup: string;
@@ -55,6 +56,7 @@ export const EMPTY_CUSTOMER: CustomerFormValues = {
   subDistrictId: '',
   postalCode: '',
   phone: '',
+  branchPhone: '',
   email: '',
   line: '',
   priceGroup: PRICE_GROUPS[0],
@@ -74,6 +76,7 @@ export const toCustomerForm = (c: Customer): CustomerFormValues => ({
   subDistrictId: c.subDistrictId ?? '',
   postalCode: c.postalCode ?? '',
   phone: c.phone,
+  branchPhone: c.branchPhone ?? '',
   email: c.email,
   line: c.line,
   priceGroup: c.priceGroup ?? PRICE_GROUPS[0],
@@ -350,6 +353,14 @@ export function CustomerFields({
         }
       >
         <Input inputMode="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} className="num" />
+      </Field>
+      <Field label="เบอร์สาขา" error={errors.branchPhone} hint="เบอร์ร้าน / สาขา — ลูกค้าหลายรายใช้เบอร์เดียวกันได้">
+        <Input
+          inputMode="tel"
+          value={form.branchPhone}
+          onChange={(e) => set('branchPhone', e.target.value)}
+          className="num"
+        />
       </Field>
 
       <Field label="Email" error={errors.email}>

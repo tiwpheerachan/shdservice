@@ -45,7 +45,7 @@ export const customerSave = defineOperation({
   tags: ['Customers'],
   summary: 'Create (no `code`) or update (with `code`) a customer',
   description:
-    'Customer add / edit. Rules: `customerSchema(prev)` in src/lib/validation/customer.ts, run by the service against the stored customer. A phone / email / tax id another customer holds → 409 with `details.conflicts` and `details.fields`. A create takes an Idempotency-Key.',
+    'Customer add / edit. Rules: `customerSchema(prev)` in src/lib/validation/customer.ts, run by the service against the stored customer. A phone / email / tax id another customer holds → 409 (`branchPhone` may be shared) with `details.conflicts` and `details.fields`. A create takes an Idempotency-Key.',
   headers: IDEMPOTENCY.headers,
   invalid: IDEMPOTENCY.invalid,
   body: customerFields
@@ -60,6 +60,7 @@ export const customerSave = defineOperation({
       subDistrictId: place.meta({ description: 'แขวง / ตำบล: its uuid; `""` = not picked.' }),
       postalCode: optText,
       phone: optText,
+      branchPhone: optText.meta({ description: 'เบอร์สาขา — never checked for duplicates.' }),
       email: optText,
       line: optText,
       priceGroup: optText,

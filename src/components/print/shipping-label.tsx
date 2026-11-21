@@ -8,13 +8,15 @@ type ParcelProps = {
   name: string;
   address: string;
   phone: string;
+  /** เบอร์สาขา — a line under the phone, only when there is one */
+  branchPhone?: string;
 };
 
 /**
  * The parcel address frame on its 210 × 147 mm sheet: the caller's @page decides the paper. The frame grows with the
  * address, past its 92mm only when it must: a parcel with a cut-off address is the worst failure here.
  */
-export function ParcelSheet({ profile, docNo, name, address, phone }: ParcelProps) {
+export function ParcelSheet({ profile, docNo, name, address, phone, branchPhone }: ParcelProps) {
   // ponytail: length stands in for measured height; a wrong guess costs a taller frame, never a character
   const chars = name.length + address.length;
   const long = chars > 240;
@@ -48,8 +50,13 @@ export function ParcelSheet({ profile, docNo, name, address, phone }: ParcelProp
             <p className={long ? 'mt-[1mm]' : 'mt-[3mm]'}>{name}</p>
             <p className={long ? 'mt-[1mm]' : 'mt-[2mm]'}>{address}</p>
             <p className={long ? 'mt-[1mm]' : 'mt-[2mm]'}>
-              โทร.<span className="num">{phone}</span>
+              เบอร์โทรศัพท์ <span className="num">{phone}</span>
             </p>
+            {branchPhone && (
+              <p className={long ? 'mt-[1mm]' : 'mt-[2mm]'}>
+                เบอร์สาขา <span className="num">{branchPhone}</span>
+              </p>
+            )}
           </div>
         </div>
       </div>
