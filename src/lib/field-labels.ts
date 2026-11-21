@@ -63,6 +63,7 @@ export const FIELD_LABEL: Record<string, string> = {
   // อะไหล่: the category by name (its pk stays out of the log)
   category: 'หมวดหมู่',
   phoneNumber: 'เบอร์โทรศัพท์',
+  branchPhone: 'เบอร์สาขา',
   lineId: 'LINE ID',
   // ออกเอกสารในนาม / ขนส่ง
   addressLine1: 'ที่อยู่ (บรรทัด 1)',

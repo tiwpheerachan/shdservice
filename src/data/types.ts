@@ -97,6 +97,7 @@ export type Customer = {
   name: string;
   address: string;
   phone: string;
+  branchPhone?: string;
   email: string;
   line: string;
   taxId: string;

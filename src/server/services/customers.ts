@@ -122,6 +122,7 @@ export function toCustomer(r: Row, createdBy = '', places?: Places): Customer {
     name: r.customerName ?? '',
     address: addressLine(r, places),
     phone: r.phoneNumber ?? '',
+    branchPhone: r.branchPhone ?? '',
     email: r.email ?? '',
     line: r.lineId ?? '',
     taxId: r.customerCardId ?? '',
@@ -230,12 +231,19 @@ const SORT = {
  * /track; backed by the trigram expression index in drizzle/0024.
  */
 const phoneDigits = sql`regexp_replace(coalesce(${customer.phoneNumber}, ''), '\\D', '', 'g')`;
+const branchDigits = sql`regexp_replace(coalesce(${customer.branchPhone}, ''), '\\D', '', 'g')`;
 const cardDigits = sql`regexp_replace(coalesce(${customer.customerCardId}, ''), '\\D', '', 'g')`;
 /** digits only — Thai digits ๐-๙ typed in a search box count as 0-9 */
 const digits = (v: unknown) => asciiDigits(str(v)).replace(/\D/g, '');
-// "+66 89 999 3466" typed → also "0899993466", and "0899993466" also finds a stored "+66 89 999 3466"
+// "+66 89 999 3466" typed → also "0899993466", and "0899993466" also finds a stored "+66 89 999 3466";
+// the เบอร์สาขา too (gin_customer_branch_phone_digits, drizzle/0017) — a branch number finds all its customers
 const phoneHas = (digits: string) =>
-  or(...phoneDigitVariants(digits).map((d) => sql`${phoneDigits} LIKE ${'%' + d + '%'}`));
+  or(
+    ...phoneDigitVariants(digits).flatMap((d) => [
+      sql`${phoneDigits} LIKE ${'%' + d + '%'}`,
+      sql`${branchDigits} LIKE ${'%' + d + '%'}`,
+    ]),
+  );
 
 /**
  * Name as clean() writes it — invisible characters dropped, any whitespace run (NBSP too) → one space: ~1,050
@@ -254,6 +262,7 @@ function customerWhere(q: string, deleted: DeletedMode, f: CustomerFilters = {})
         ilike(customer.customerCode, likeTerm(term)),
         ilike(nameText, likeTerm(clean(term))),
         ilike(customer.phoneNumber, likeTerm(term)),
+        ilike(customer.branchPhone, likeTerm(term)),
         termDigits.length >= 4 ? phoneHas(termDigits) : undefined,
         ilike(customer.email, likeTerm(term)),
         ilike(customer.customerCardId, likeTerm(term)),
@@ -493,6 +502,8 @@ function columnsOf(i: Omit<CustomerInput, 'cityId' | 'districtId' | 'subDistrict
     postalCode: clean(i.postalCode),
     email: clean(i.email).toLowerCase(),
     lineId: clean(i.line),
+    // shared by a shop's customers: written like phone_number, never checked for duplicates
+    branchPhone: localPhone(clean(normalizePhone(i.branchPhone))),
     usePriceGroup: PRICE_GROUP_VALUE[clean(i.priceGroup)] ?? (clean(i.priceGroup) || 'Retail'),
   };
 }

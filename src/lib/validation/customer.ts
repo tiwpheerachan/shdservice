@@ -93,6 +93,7 @@ export type CustomerPrev = Partial<
   Record<
     | 'name'
     | 'phone'
+    | 'branchPhone'
     | 'taxId'
     | 'email'
     | 'line'
@@ -152,6 +153,13 @@ export function customerSchema(prev?: CustomerPrev | null) {
               'phone',
               'ลูกค้าบุคคลต้องมีเบอร์มือถือ (06 / 08 / 09 + 8 หลัก) — ใช้รับรหัส OTP ติดตามงาน (นิติบุคคลใช้เบอร์สำนักงานได้)',
             );
+        }
+
+        const branchPhone = normalizePhone(v.branchPhone);
+        if (branchPhone && !same('branchPhone', v.branchPhone, normalizePhone)) {
+          if (!phoneFormatOk(branchPhone))
+            bad('branchPhone', 'เบอร์สาขาไม่ถูกต้อง (เบอร์ละ 9–10 หลัก หลายเบอร์คั่นด้วย /)');
+          else if (branchPhone.length > 50) bad('branchPhone', 'เบอร์สาขายาวเกิน 50 ตัวอักษร');
         }
 
         // the form shows a legacy address-only row's one-line address in บรรทัด 1 (toCustomerForm)

@@ -3491,7 +3491,7 @@
           "Customers"
         ],
         "summary": "Create (no `code`) or update (with `code`) a customer",
-        "description": "Customer add / edit. Rules: `customerSchema(prev)` in src/lib/validation/customer.ts, run by the service against the stored customer. A phone / email / tax id another customer holds → 409 with `details.conflicts` and `details.fields`. A create takes an Idempotency-Key.",
+        "description": "Customer add / edit. Rules: `customerSchema(prev)` in src/lib/validation/customer.ts, run by the service against the stored customer. A phone / email / tax id another customer holds → 409 (`branchPhone` may be shared) with `details.conflicts` and `details.fields`. A create takes an Idempotency-Key.",
         "parameters": [
           {
             "schema": {
@@ -17282,6 +17282,9 @@
               "phone": {
                 "type": "string"
               },
+              "branchPhone": {
+                "type": "string"
+              },
               "line": {
                 "type": "string"
               },
@@ -17296,6 +17299,7 @@
               "taxId",
               "address",
               "phone",
+              "branchPhone",
               "line",
               "email"
             ]
@@ -18236,6 +18240,10 @@
           "phone": {
             "type": "string"
           },
+          "branchPhone": {
+            "type": "string",
+            "description": "เบอร์สาขา — may be shared by several customers."
+          },
           "email": {
             "type": "string"
           },
@@ -18388,6 +18396,10 @@
           },
           "phone": {
             "type": "string"
+          },
+          "branchPhone": {
+            "type": "string",
+            "description": "เบอร์สาขา — never checked for duplicates."
           },
           "email": {
             "type": "string"

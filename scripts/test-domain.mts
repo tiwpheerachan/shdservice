@@ -4522,6 +4522,22 @@ try {
       assert.equal(edit.status, 200, JSON.stringify(edit.body));
     });
 
+    await test('customers: เบอร์สาขา may be shared (never a 409) and finds every customer holding it; the own phone still may not', async () => {
+      const rnd = (n: number) => String(Math.floor(Math.random() * 10 ** n)).padStart(n, '0');
+      const [branch, p1, p2] = [`02${rnd(7)}`, `08${rnd(8)}`, `09${rnd(8)}`];
+      const save = async (body: object) =>
+        json(await customerPOST(await request('/api/customers', U.admin, { method: 'POST', body })));
+      const a = await save({ name: 'TD สาขา ก', phone: p1, branchPhone: branch });
+      const b = await save({ name: 'TD สาขา ข', phone: p2, branchPhone: `${branch.slice(0, 2)}-${branch.slice(2)}` });
+      assert.deepEqual([a.status, b.status], [201, 201], JSON.stringify([a.body, b.body]));
+      const codes = [a.body.row, b.body.row].map((r) => (r as { code: string }).code);
+      const found = (await listCustomers({ q: branch })).map((c) => c.code);
+      assert.ok(codes.every((c) => found.includes(c)), 'a search by the branch number finds both');
+      assert.equal((await save({ name: 'TD สาขา ค', phone: p1, branchPhone: branch })).status, 409, 'own phone still unique');
+      assert.equal((await save({ name: 'TD สาขา ง', phone: `06${rnd(8)}`, branchPhone: '12' })).status, 400);
+      await pool.query(`DELETE FROM customer WHERE customer_code = ANY($1)`, [codes]);
+    });
+
     await test('R5 customers: an "unchanged" phone is the same text — "-" → "ไม่มีเบอร์" and "081abc2345678" for "081-234-5678" → 400; the same text saves and is kept as is', async () => {
       await pool.query(`
         DELETE FROM customer WHERE customer_code = 'TDC503';

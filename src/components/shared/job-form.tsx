@@ -197,6 +197,7 @@ export function fromJob(j: JobDetail): JobFormState {
           name: j.customer.name,
           address: j.customer.address,
           phone: j.customer.phone,
+          branchPhone: j.customer.branchPhone,
           email: j.customer.email,
           line: j.customer.line,
           taxId: j.customer.taxId,

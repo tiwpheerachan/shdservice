@@ -27,6 +27,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       name={j.customer?.name ?? ''}
       address={j.customer?.address ?? ''}
       phone={j.customer?.phone ?? ''}
+      branchPhone={j.customer?.branchPhone}
     />
   );
 }

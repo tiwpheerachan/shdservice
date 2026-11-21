@@ -57,6 +57,7 @@ export async function JobReceiptDoc({ no, forCustomer }: { no: string; forCustom
               { k: 'รหัสลูกค้า', v: c?.code },
               { k: 'ชื่อลูกค้า', v: c?.name },
               { k: 'โทรศัพท์', v: c?.phone },
+              ...(c?.branchPhone ? [{ k: 'เบอร์สาขา', v: c.branchPhone }] : []),
               { k: 'Line ID', v: c?.line },
               { k: 'ที่อยู่', v: c?.address },
               { k: 'อีเมล', v: c?.email, email: true },
@@ -182,6 +183,7 @@ function ParcelPage({ j, co }: { j: JobDetail; co: DocumentProfile }) {
         name={c?.name ?? ''}
         address={c?.address ?? ''}
         phone={c?.phone ?? ''}
+        branchPhone={c?.branchPhone}
       />
     </div>
   );

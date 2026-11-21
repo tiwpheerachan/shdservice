@@ -202,6 +202,8 @@ export const customer = pgTable(
     customerAddress2: varchar('customer_address2', { length: 500 }),
     postalCode: varchar('postal_code', { length: 5 }),
     phoneNumber: varchar('phone_number', { length: 50 }),
+    // เบอร์สาขา — shared by a shop's customers, never in the duplicate check (drizzle/0017)
+    branchPhone: varchar('branch_phone', { length: 50 }),
     faxNumber: varchar('fax_number', { length: 50 }),
     email: varchar({ length: 50 }),
     customerType: varchar('customer_type', { length: 50 }),
